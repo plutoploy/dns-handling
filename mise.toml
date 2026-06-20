@@ -1,0 +1,10 @@
+[tools]
+go = "latest"
+claude-code = "latest"
+node = "latest"
+
+[deps]
+go = { auto = true }
+
+[settings]
+experimental = true
