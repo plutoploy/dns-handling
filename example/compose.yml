@@ -1,0 +1,12 @@
+services:
+  dns:
+    image: ghcr.io/plutoploy/dns-handling:latest
+    container_name: dns_records
+    env_file:
+      - .env
+    networks:
+      - server
+
+networks:
+  server:
+    name: server
