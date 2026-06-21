@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	_ "github.com/tursodatabase/libsql-client-go/libsql"
+	_ "modernc.org/sqlite"
 	"go.uber.org/zap"
 )
 
@@ -21,7 +21,7 @@ type DB struct {
 }
 
 func New(dsn string, logger *zap.Logger) (*DB, error) {
-	db, err := sql.Open("libsql", dsn)
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
