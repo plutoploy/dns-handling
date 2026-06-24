@@ -12,18 +12,18 @@ import (
 
 	"plutoploy/tls/internal/acme"
 	"plutoploy/tls/internal/certificates"
-	"plutoploy/tls/internal/domain"
 	"plutoploy/tls/internal/dns"
+	"plutoploy/tls/internal/domain"
 )
 
 type Handler struct {
-	domainSvc  *domain.Service
-	certSvc    *certificates.Service
-	acmeProv   acme.Provider
-	dns        dns.Resolver
-	logger     *zap.Logger
-	pollInt    time.Duration
-	pollTO     time.Duration
+	domainSvc *domain.Service
+	certSvc   *certificates.Service
+	acmeProv  acme.Provider
+	dns       dns.Resolver
+	logger    *zap.Logger
+	pollInt   time.Duration
+	pollTO    time.Duration
 }
 
 func NewHandler(
@@ -34,6 +34,21 @@ func NewHandler(
 	logger *zap.Logger,
 	pollInterval, pollTimeout time.Duration,
 ) *Handler {
+	if domainSvc == nil {
+		panic("http handler requires domain service")
+	}
+	if certSvc == nil {
+		panic("http handler requires certificate service")
+	}
+	if acmeProv == nil {
+		panic("http handler requires acme provider")
+	}
+	if dns == nil {
+		panic("http handler requires dns resolver")
+	}
+	if logger == nil {
+		panic("http handler requires logger")
+	}
 	return &Handler{
 		domainSvc: domainSvc,
 		certSvc:   certSvc,
@@ -160,11 +175,11 @@ func (h *Handler) VerifyDomain(w http.ResponseWriter, r *http.Request) {
 }
 
 type issueCertResp struct {
-	OrderID             string `json:"order_id"`
-	Status              string `json:"status"`
-	ChallengeDomain     string `json:"challenge_domain"`
-	ExpectedTXTValue    string `json:"expected_txt_value"`
-	Instructions        string `json:"instructions"`
+	OrderID          string `json:"order_id"`
+	Status           string `json:"status"`
+	ChallengeDomain  string `json:"challenge_domain"`
+	ExpectedTXTValue string `json:"expected_txt_value"`
+	Instructions     string `json:"instructions"`
 }
 
 func (h *Handler) IssueCertificate(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +203,7 @@ func (h *Handler) IssueCertificate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	order, challenge, err := h.acmeProv.StartOrder(r.Context(), d.DomainName, accountKey, accountKID)
+	order, challenge, err := h.acmeProv.StartOrder(r.Context(), d.ID, d.DomainName, accountKey, accountKID)
 	if err != nil {
 		h.logger.Error("acme start order", zap.Error(err))
 		writeError(w, http.StatusInternalServerError, "start acme order failed: %v", err)
@@ -203,7 +218,7 @@ func (h *Handler) IssueCertificate(w http.ResponseWriter, r *http.Request) {
 
 	challengeDomain := h.domainSvc.ChallengeDomain(d.DomainName)
 
-	go h.pollACME(r.Context(), d.ID, d.DomainName, accountKey, accountKID, order.ID, *challenge)
+	go h.pollACME(d.ID, d.DomainName, accountKey, accountKID, order.ID, *challenge)
 
 	resp := issueCertResp{
 		OrderID:          order.ID,
@@ -216,8 +231,9 @@ func (h *Handler) IssueCertificate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, resp)
 }
 
-func (h *Handler) pollACME(ctx context.Context, domainID, domainName string, accountKey crypto.Signer, accountKID, orderID string, ch acme.Challenge) {
-	pollCtx, cancel := context.WithTimeout(context.Background(), h.pollTO)
+func (h *Handler) pollACME(domainID, domainName string, accountKey crypto.Signer, accountKID, orderID string, ch acme.Challenge) {
+	ctx := context.Background()
+	pollCtx, cancel := context.WithTimeout(ctx, h.pollTO)
 	defer cancel()
 
 	ticker := time.NewTicker(h.pollInt)
@@ -264,7 +280,7 @@ func (h *Handler) pollACME(ctx context.Context, domainID, domainName string, acc
 				return
 			}
 
-			if _, err := h.certSvc.Store(pollCtx, domainID, certPEM, keyPEM, issuedAt, expiresAt); err != nil {
+			if _, err := h.certSvc.Store(ctx, domainID, certPEM, keyPEM, issuedAt, expiresAt); err != nil {
 				h.logger.Error("store certificate failed", zap.String("domain", domainName), zap.Error(err))
 				if _, err := h.domainSvc.SetFailed(ctx, domainID); err != nil {
 					h.logger.Error("set domain failed", zap.Error(err))

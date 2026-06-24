@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/caddyserver/certmagic"
 	"go.uber.org/zap"
 
 	"plutoploy/tls/internal/acme"
@@ -18,6 +19,7 @@ import (
 	"plutoploy/tls/internal/dns"
 	"plutoploy/tls/internal/domain"
 	httphandler "plutoploy/tls/internal/http"
+	"plutoploy/tls/internal/tls"
 )
 
 func main() {
@@ -36,6 +38,7 @@ func main() {
 	logger.Info("starting tls service",
 		zap.String("addr", cfg.ServerAddr),
 		zap.String("db", cfg.DatabaseURL),
+		zap.String("base_domain", cfg.BaseDomain),
 	)
 
 	db, err := database.New(cfg.DatabaseURL, logger)
@@ -49,6 +52,7 @@ func main() {
 	}
 
 	dnsResolver := dns.NewNetResolver(cfg.DNSTimeout)
+	dynamicResolver := dns.NewDynamicResolver(cfg.BaseDomain, 5*time.Minute, logger)
 
 	domainRepo := database.NewDomainRepository(db)
 	domainSvc := domain.NewService(domainRepo)
@@ -56,20 +60,30 @@ func main() {
 	acctRepo := database.NewACMEAccountRepository(db)
 	orderRepo := database.NewACMEOrderRepository(db)
 	challengeRepo := database.NewACMEChallengeRepository(db)
-
-	acmeProv := acme.NewProvider(
-		cfg.ACMEDirectory,
-		cfg.ACMEEmail,
-		orderRepo,
-		challengeRepo,
-		acctRepo,
-		logger,
-	)
-
 	certRepo := database.NewCertificateRepository(db)
 	certSvc := certificates.NewService(certRepo)
+	acmeProv := acme.NewProvider(cfg.ACMEDirectory, cfg.ACMEEmail, orderRepo, challengeRepo, acctRepo, logger)
 
-	handler := httphandler.NewHandler(
+	certmagicStorage := &certmagic.FileStorage{
+		Path: cfg.CertMagicStoragePath,
+	}
+
+	magicManager := tls.NewCertMagicManager(tls.ManagerConfig{
+		Email:    cfg.ACMEEmail,
+		CA:       cfg.ACMEDirectory,
+		Storage:  certmagicStorage,
+		Resolver: dynamicResolver,
+		Logger:   logger,
+	})
+
+	dnsSrv := dns.NewDNSServer(dns.DNSServerConfig{
+		ListenAddr: cfg.DNSAddr,
+		BaseDomain: cfg.BaseDomain,
+		Resolver:   dynamicResolver,
+		Logger:     logger,
+	})
+
+	domainHandler := httphandler.NewHandler(
 		domainSvc,
 		certSvc,
 		acmeProv,
@@ -79,23 +93,44 @@ func main() {
 		cfg.PollTimeout,
 	)
 
-	router := httphandler.NewRouter(handler)
+	dnsHandler := httphandler.NewDNSHandler(dnsSrv, logger)
 
-	srv := &http.Server{
-		Addr:         cfg.ServerAddr,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  60 * time.Second,
+	router := httphandler.NewRouter(domainHandler, dnsHandler, cfg.AuthToken)
+
+	httpSrv := magicManager.StartHTTPServer(cfg.HTTPAddr, router)
+	tlsSrv, err := magicManager.StartTLSServer(cfg.TLSAddr, router, cfg.BaseDomain)
+	if err != nil {
+		logger.Fatal("create TLS server", zap.Error(err))
 	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
-		logger.Info("listening", zap.String("addr", cfg.ServerAddr))
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("server error", zap.Error(err))
+		logger.Info("managing dynamic domain")
+		if _, err := magicManager.ManageDynamicDomain(context.Background()); err != nil {
+			logger.Error("manage dynamic domain", zap.Error(err))
+		}
+	}()
+
+	go func() {
+		logger.Info("DNS server listening", zap.String("addr", cfg.DNSAddr))
+		if err := dnsSrv.Start(); err != nil {
+			logger.Error("DNS server error", zap.Error(err))
+		}
+	}()
+
+	go func() {
+		logger.Info("HTTP server listening", zap.String("addr", cfg.HTTPAddr))
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("HTTP server error", zap.Error(err))
+		}
+	}()
+
+	go func() {
+		logger.Info("TLS server listening", zap.String("addr", cfg.TLSAddr))
+		if err := tlsSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+			logger.Error("TLS server error", zap.Error(err))
 		}
 	}()
 
@@ -105,8 +140,16 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
-		logger.Fatal("shutdown error", zap.Error(err))
+	if err := dnsSrv.Shutdown(); err != nil {
+		logger.Error("DNS shutdown error", zap.Error(err))
+	}
+
+	if err := httpSrv.Shutdown(ctx); err != nil {
+		logger.Error("HTTP shutdown error", zap.Error(err))
+	}
+
+	if err := tlsSrv.Shutdown(ctx); err != nil {
+		logger.Error("TLS shutdown error", zap.Error(err))
 	}
 
 	logger.Info("stopped")

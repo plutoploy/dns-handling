@@ -59,14 +59,25 @@ type AccountRepository interface {
 	Save(ctx context.Context, a *Account) error
 }
 
+type client interface {
+	NewAccount(ctx context.Context, account acme.Account) (acme.Account, error)
+	NewOrder(ctx context.Context, account acme.Account, order acme.Order) (acme.Order, error)
+	GetAuthorization(ctx context.Context, account acme.Account, authzURL string) (acme.Authorization, error)
+	InitiateChallenge(ctx context.Context, account acme.Account, challenge acme.Challenge) (acme.Challenge, error)
+	PollAuthorization(ctx context.Context, account acme.Account, authz acme.Authorization) (acme.Authorization, error)
+	GetOrder(ctx context.Context, account acme.Account, order acme.Order) (acme.Order, error)
+	FinalizeOrder(ctx context.Context, account acme.Account, order acme.Order, csrASN1DER []byte) (acme.Order, error)
+	GetCertificateChain(ctx context.Context, account acme.Account, certURL string) ([]acme.Certificate, error)
+}
+
 type Provider interface {
 	SetupAccount(ctx context.Context) (crypto.Signer, string, error)
-	StartOrder(ctx context.Context, domainName string, accountKey crypto.Signer, accountKID string) (*Order, *Challenge, error)
+	StartOrder(ctx context.Context, domainID, domainName string, accountKey crypto.Signer, accountKID string) (*Order, *Challenge, error)
 	CompleteOrder(ctx context.Context, accountKey crypto.Signer, accountKID, orderID string, ch Challenge) (string, string, time.Time, time.Time, error)
 }
 
 type ACMEProvider struct {
-	client       *acme.Client
+	client       client
 	email        string
 	orderRepo    OrderRepository
 	challengeRep ChallengeRepository
@@ -142,6 +153,7 @@ func (p *ACMEProvider) SetupAccount(ctx context.Context) (crypto.Signer, string,
 
 func (p *ACMEProvider) StartOrder(
 	ctx context.Context,
+	domainID,
 	domainName string,
 	accountKey crypto.Signer,
 	accountKID string,
@@ -180,10 +192,10 @@ func (p *ACMEProvider) StartOrder(
 	txtValue := dnsChallenge.DNS01KeyAuthorization()
 
 	order := &Order{
-		ID:       newID(),
-		DomainID: domainName,
-		OrderURL: acmeOrder.Location,
-		Status:   "pending",
+		ID:        newID(),
+		DomainID:  domainID,
+		OrderURL:  acmeOrder.Location,
+		Status:    "pending",
 		CreatedAt: time.Now().UTC(),
 	}
 
@@ -193,7 +205,7 @@ func (p *ACMEProvider) StartOrder(
 
 	challenge := &Challenge{
 		ID:               newID(),
-		DomainID:         domainName,
+		DomainID:         domainID,
 		AuthorizationURL: authz.Location,
 		ChallengeURL:     dnsChallenge.URL,
 		Token:            dnsChallenge.Token,
@@ -263,6 +275,10 @@ func (p *ACMEProvider) CompleteOrder(
 	certKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return "", "", time.Time{}, time.Time{}, fmt.Errorf("generate cert key: %w", err)
+	}
+
+	if len(acmeOrder.Identifiers) == 0 {
+		return "", "", time.Time{}, time.Time{}, fmt.Errorf("order missing identifiers")
 	}
 
 	csr, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{

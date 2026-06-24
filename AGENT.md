@@ -24,7 +24,7 @@ Store domain record in db.
 
 Return instructions to create:
 
-_acme-challenge. TXT 
+\_acme-challenge. TXT
 
 Expose an API endpoint to trigger verification.
 
