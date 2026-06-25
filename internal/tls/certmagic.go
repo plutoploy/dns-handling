@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/caddyserver/certmagic"
@@ -15,14 +14,13 @@ import (
 )
 
 type CertMagicManager struct {
-	cache     *certmagic.Cache
-	configs   map[string]*certmagic.Config
-	configsMu sync.RWMutex
-	resolver  *dns.DynamicResolver
-	email     string
-	ca        string
-	storage   certmagic.Storage
-	logger    *zap.Logger
+	cache    *certmagic.Cache
+	config   *certmagic.Config
+	resolver *dns.DynamicResolver
+	email    string
+	ca       string
+	storage  certmagic.Storage
+	logger   *zap.Logger
 }
 
 type ManagerConfig struct {
@@ -38,115 +36,78 @@ func NewCertMagicManager(cfg ManagerConfig) *CertMagicManager {
 		cfg.CA = certmagic.LetsEncryptStagingCA
 	}
 
-	cacheOpts := certmagic.CacheOptions{}
-
-	cache := certmagic.NewCache(cacheOpts)
-
-	return &CertMagicManager{
-		cache:    cache,
-		configs:  make(map[string]*certmagic.Config),
+	m := &CertMagicManager{
 		resolver: cfg.Resolver,
 		email:    cfg.Email,
 		ca:       cfg.CA,
 		storage:  cfg.Storage,
 		logger:   cfg.Logger,
 	}
-}
 
-func (m *CertMagicManager) GetConfig(domain string) *certmagic.Config {
-	m.configsMu.RLock()
-	cfg, ok := m.configs[domain]
-	m.configsMu.RUnlock()
-	if ok {
-		return cfg
+	cacheOpts := certmagic.CacheOptions{
+		GetConfigForCert: func(cert certmagic.Certificate) (*certmagic.Config, error) {
+			return m.config, nil
+		},
+		Logger: cfg.Logger,
 	}
 
-	return m.getOrCreateConfig(domain)
-}
+	m.cache = certmagic.NewCache(cacheOpts)
 
-func (m *CertMagicManager) getOrCreateConfig(domain string) *certmagic.Config {
-	m.configsMu.Lock()
-	defer m.configsMu.Unlock()
-
-	if cfg, ok := m.configs[domain]; ok {
-		return cfg
-	}
-
-	cfg := certmagic.New(m.cache, certmagic.Config{
+	m.config = certmagic.New(m.cache, certmagic.Config{
 		Storage: m.storage,
 	})
 
-	issuer := certmagic.NewACMEIssuer(cfg, certmagic.ACMEIssuer{
+	issuer := certmagic.NewACMEIssuer(m.config, certmagic.ACMEIssuer{
 		CA:     m.ca,
 		Email:  m.email,
 		Agreed: true,
 	})
 
-	cfg.Issuers = []certmagic.Issuer{issuer}
+	m.config.Issuers = []certmagic.Issuer{issuer}
 
-	m.configs[domain] = cfg
-	return cfg
+	return m
+}
+
+func (m *CertMagicManager) GetConfig(domain string) *certmagic.Config {
+	return m.config
 }
 
 func (m *CertMagicManager) ObtainCert(ctx context.Context, domain string) error {
-	cfg := m.GetConfig(domain)
-	return cfg.ObtainCertSync(ctx, domain)
+	return m.config.ObtainCertSync(ctx, domain)
 }
 
 func (m *CertMagicManager) RenewCert(ctx context.Context, domain string, force bool) error {
-	cfg := m.GetConfig(domain)
-	return cfg.RenewCertSync(ctx, domain, force)
+	return m.config.RenewCertSync(ctx, domain, force)
 }
 
 func (m *CertMagicManager) ManageAsync(ctx context.Context, domains []string) {
-	for _, domain := range domains {
-		cfg := m.GetConfig(domain)
-		go cfg.ManageAsync(ctx, []string{domain})
-	}
+	go m.config.ManageAsync(ctx, domains)
 }
 
 func (m *CertMagicManager) ManageSync(ctx context.Context, domains []string) error {
-	for _, domain := range domains {
-		cfg := m.GetConfig(domain)
-		if err := cfg.ManageSync(ctx, []string{domain}); err != nil {
-			return fmt.Errorf("manage %s: %w", domain, err)
-		}
+	if err := m.config.ManageSync(ctx, domains); err != nil {
+		return fmt.Errorf("manage %v: %w", domains, err)
 	}
 	return nil
 }
 
 func (m *CertMagicManager) TLSConfig(domain string) *tls.Config {
-	cfg := m.GetConfig(domain)
-	tlsCfg := cfg.TLSConfig()
+	tlsCfg := m.config.TLSConfig()
 	tlsCfg.NextProtos = append([]string{"h2", "http/1.1"}, tlsCfg.NextProtos...)
 	return tlsCfg
 }
 
 func (m *CertMagicManager) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
-	cfg := m.GetConfig(hello.ServerName)
-	return cfg.GetCertificate(hello)
+	return m.config.GetCertificate(hello)
 }
 
 func (m *CertMagicManager) HTTPChallengeHandler(h http.Handler) http.Handler {
-	for _, cfg := range m.getAllConfigs() {
-		for _, issuer := range cfg.Issuers {
-			if am, ok := issuer.(*certmagic.ACMEIssuer); ok {
-				h = am.HTTPChallengeHandler(h)
-			}
+	for _, issuer := range m.config.Issuers {
+		if am, ok := issuer.(*certmagic.ACMEIssuer); ok {
+			h = am.HTTPChallengeHandler(h)
 		}
 	}
 	return h
-}
-
-func (m *CertMagicManager) getAllConfigs() []*certmagic.Config {
-	m.configsMu.RLock()
-	defer m.configsMu.RUnlock()
-
-	configs := make([]*certmagic.Config, 0, len(m.configs))
-	for _, cfg := range m.configs {
-		configs = append(configs, cfg)
-	}
-	return configs
 }
 
 func (m *CertMagicManager) ManageDynamicDomain(ctx context.Context) (string, error) {
