@@ -21,6 +21,10 @@ jobs:
             goarch: amd64
           - goos: darwin
             goarch: arm64
+          - goos: freebsd
+            goarch: amd64
+          - goos: freebsd
+            goarch: arm64
 
     steps:
       - uses: actions/checkout@main
@@ -35,13 +39,13 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
-        run: go build -trimpath -ldflags="-s -w" -o dns-handler-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/server
+        run: go build -trimpath -ldflags="-s -w" -o ${{ github.event.repository.name }}-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/server
 
       - name: Upload artifact
         uses: actions/upload-artifact@main
         with:
-          name: dns-handler-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dns-handler-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: ${{ github.event.repository.name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: ${{ github.event.repository.name }}-${{ matrix.goos }}-${{ matrix.goarch }}
 
   release:
     needs: build
@@ -58,5 +62,6 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@master
         with:
-          generate_release_notes: false
+          tag_name: v${{ github.run_number }}
+          name: v${{ github.run_id }}
           files: dist/**/*

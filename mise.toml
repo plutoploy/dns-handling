@@ -4,6 +4,8 @@ claude-code = "latest"
 node = "latest"
 betterleaks = "latest"
 codex = "latest"
+action-validator = "latest"
+actionlint = "latest"
 
 [deps]
 go = { auto = true }

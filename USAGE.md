@@ -46,6 +46,7 @@ go run cmd/server/main.go
 Once the server is running, point `API_BASE_URL` at it and use the REST endpoints below:
 
 ### Step 1: Register a Domain
+
 Submit a domain name to generate a verification token.
 
 ```bash
@@ -53,9 +54,11 @@ curl -X POST "${API_BASE_URL}/domains" \
   -H "Content-Type: application/json" \
   -d '{"domain_name": "example.com"}'
 ```
-*The response will give you a domain `id` and a `verification_token` to set as a `_acme-challenge` TXT record in your DNS.*
+
+_The response will give you a domain `id` and a `verification_token` to set as a `_acme-challenge` TXT record in your DNS._
 
 ### Step 2: Check Domain Status
+
 Check the status of your domain using the ID returned in the previous step.
 
 ```bash
@@ -63,6 +66,7 @@ curl "${API_BASE_URL}/domains/<domain_id>"
 ```
 
 ### Step 3: Trigger Verification
+
 Once you've added the TXT record to your DNS, tell the server to verify it.
 
 ```bash
@@ -70,6 +74,7 @@ curl -X POST "${API_BASE_URL}/domains/<domain_id>/verify"
 ```
 
 ### Step 4: Issue Certificate
+
 After verification succeeds, start the ACME DNS-01 certificate order.
 
 ```bash
@@ -77,6 +82,7 @@ curl -X POST "${API_BASE_URL}/domains/<domain_id>/issue-certificate"
 ```
 
 ### Step 5: Retrieve Certificate
+
 Finally, once the certificate is generated, you can retrieve its metadata.
 
 ```bash
