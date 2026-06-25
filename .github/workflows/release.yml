@@ -58,5 +58,5 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@master
         with:
-          generate_release_notes: true
+          generate_release_notes: false
           files: dist/**/*
