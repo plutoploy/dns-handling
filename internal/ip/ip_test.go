@@ -33,13 +33,13 @@ func TestGetSubdomain(t *testing.T) {
 			name:       "IPv4 with dot domain",
 			ipResponse: "127.0.0.1",
 			domain:     ".example.com",
-			want:       "dns.7f000001.example.com",
+			want:       "dns-7f000001.example.com",
 		},
 		{
 			name:       "IPv4 without dot domain",
 			ipResponse: "8.8.8.8",
 			domain:     "example.com",
-			want:       "dns.08080808.example.com",
+			want:       "dns-08080808.example.com",
 		},
 		{
 			name:       "Invalid IP response",

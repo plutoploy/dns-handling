@@ -17,14 +17,15 @@ import (
 )
 
 type Handler struct {
-	appCtx    context.Context
-	domainSvc *domain.Service
-	certSvc   *certificates.Service
-	acmeProv  acme.Provider
-	dns       dns.Resolver
-	logger    *zap.Logger
-	pollInt   time.Duration
-	pollTO    time.Duration
+	appCtx     context.Context
+	domainSvc  *domain.Service
+	certSvc    *certificates.Service
+	acmeProv   acme.Provider
+	dns        dns.Resolver
+	logger     *zap.Logger
+	baseDomain string
+	pollInt    time.Duration
+	pollTO     time.Duration
 }
 
 func NewHandler(
@@ -33,6 +34,7 @@ func NewHandler(
 	acmeProv acme.Provider,
 	dns dns.Resolver,
 	logger *zap.Logger,
+	baseDomain string,
 	appCtx context.Context,
 	pollInterval, pollTimeout time.Duration,
 ) *Handler {
@@ -55,14 +57,15 @@ func NewHandler(
 		appCtx = context.Background()
 	}
 	return &Handler{
-		appCtx:    appCtx,
-		domainSvc: domainSvc,
-		certSvc:   certSvc,
-		acmeProv:  acmeProv,
-		dns:       dns,
-		logger:    logger,
-		pollInt:   pollInterval,
-		pollTO:    pollTimeout,
+		appCtx:     appCtx,
+		domainSvc:  domainSvc,
+		certSvc:    certSvc,
+		acmeProv:   acmeProv,
+		dns:        dns,
+		logger:     logger,
+		baseDomain: baseDomain,
+		pollInt:    pollInterval,
+		pollTO:     pollTimeout,
 	}
 }
 
@@ -74,6 +77,7 @@ type createDomainResp struct {
 	ID                string `json:"id"`
 	DomainName        string `json:"domain_name"`
 	VerificationToken string `json:"verification_token"`
+	ProjectSubdomain  string `json:"project_subdomain"`
 	Status            string `json:"status"`
 	Instructions      string `json:"instructions,omitempty"`
 }
@@ -102,8 +106,11 @@ func (h *Handler) CreateDomain(w http.ResponseWriter, r *http.Request) {
 		ID:                d.ID,
 		DomainName:        d.DomainName,
 		VerificationToken: d.VerificationToken,
+		ProjectSubdomain:  d.ProjectSubdomain,
 		Status:            string(d.Status),
-		Instructions:      fmt.Sprintf("Create a TXT record for %s with value: %s", challengeDomain, d.VerificationToken),
+		Instructions: fmt.Sprintf(
+			"1. Point your domain CNAME/A to: %s.%s. 2. Verify ownership by setting a TXT record for %s with value: %s OR pointing CNAME _acme-challenge.%s to _acme-challenge.%s.%s",
+			d.ProjectSubdomain, h.baseDomain, challengeDomain, d.VerificationToken, d.DomainName, d.ProjectSubdomain, h.baseDomain),
 	}
 
 	writeJSON(w, http.StatusCreated, resp)

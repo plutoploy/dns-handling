@@ -241,7 +241,7 @@ func TestIssueCertificateCompletesAfterRequestContextEnds(t *testing.T) {
 		},
 	}
 
-	h := NewHandler(domainSvc, certSvc, prov, resolver, zap.NewNop(), context.Background(), 10*time.Millisecond, 250*time.Millisecond)
+	h := NewHandler(domainSvc, certSvc, prov, resolver, zap.NewNop(), "example.com", context.Background(), 10*time.Millisecond, 250*time.Millisecond)
 
 	reqCtx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodPost, "/domains/"+domainID+"/issue-certificate", nil).WithContext(reqCtx)
@@ -335,7 +335,7 @@ func TestIssueCertificateTimeoutMarksFailed(t *testing.T) {
 		},
 	}
 
-	h := NewHandler(domainSvc, certSvc, prov, resolver, zap.NewNop(), context.Background(), 10*time.Millisecond, 80*time.Millisecond)
+	h := NewHandler(domainSvc, certSvc, prov, resolver, zap.NewNop(), "example.com", context.Background(), 10*time.Millisecond, 80*time.Millisecond)
 
 	req := httptest.NewRequest(http.MethodPost, "/domains/"+domainID+"/issue-certificate", nil)
 	req.SetPathValue("id", domainID)

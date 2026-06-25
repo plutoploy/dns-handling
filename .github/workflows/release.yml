@@ -39,7 +39,7 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 0
-        run: go build -trimpath -ldflags="-s -w" -o ${{ github.event.repository.name }}-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/server
+        run: go build -trimpath -ldflags="-s -w" -o ${{ github.event.repository.name }}-${{ matrix.goos }}-${{ matrix.goarch }} .
 
       - name: Upload artifact
         uses: actions/upload-artifact@main

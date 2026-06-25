@@ -93,6 +93,9 @@ func TestCreate(t *testing.T) {
 	if d.VerificationToken == "" {
 		t.Errorf("expected non-empty verification token")
 	}
+	if d.ProjectSubdomain == "" {
+		t.Errorf("expected non-empty project subdomain")
+	}
 }
 
 func TestVerifyTXTSuccess(t *testing.T) {

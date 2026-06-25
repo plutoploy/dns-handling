@@ -36,9 +36,9 @@ func GetSubdomain(domain string) (string, error) {
 	if ip.To4() != nil {
 		ipv4 := ip.To4()
 		hexStr := fmt.Sprintf("%02x%02x%02x%02x", ipv4[0], ipv4[1], ipv4[2], ipv4[3])
-		return "dns." + hexStr + suffix, nil
+		return "dns-" + hexStr + suffix, nil
 	} else {
 		hexStr := hex.EncodeToString(ip)
-		return "dns." + hexStr + suffix, nil
+		return "dns-" + hexStr + suffix, nil
 	}
 }

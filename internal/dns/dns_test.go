@@ -28,11 +28,11 @@ func TestIPToSubdomain(t *testing.T) {
 	}{
 		{
 			ip:   "127.0.0.1",
-			want: "dns.7f000001.example.com",
+			want: "dns-7f000001.example.com",
 		},
 		{
 			ip:   "8.8.8.8",
-			want: "dns.08080808.example.com",
+			want: "dns-08080808.example.com",
 		},
 		{
 			ip:      "invalid-ip",
@@ -467,5 +467,159 @@ func TestDNSServerResolveTXTDynamically(t *testing.T) {
 		}
 	} else {
 		t.Errorf("expected TXT record, got %T", resp2.Answer[0])
+	}
+}
+
+func TestDNSServerResolveProjectSubdomainAAndTXT(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+
+	db, err := database.New("file::memory:?cache=shared", logger)
+	if err != nil {
+		t.Fatalf("failed to create test db: %v", err)
+	}
+	defer db.Close()
+
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("failed to run migrations: %v", err)
+	}
+
+	// Insert domain with a custom project_subdomain
+	domainRepo := database.NewDomainRepository(db)
+	d := &domain.Domain{
+		ID:                "domain-proj-123",
+		DomainName:        "userapp.com",
+		VerificationToken: "token-proj-123",
+		ProjectSubdomain:  "proj-myproject123",
+		Status:            domain.StatusPending,
+		CreatedAt:         time.Now().UTC(),
+		UpdatedAt:         time.Now().UTC(),
+	}
+	if err := domainRepo.Create(context.Background(), d); err != nil {
+		t.Fatalf("failed to create domain: %v", err)
+	}
+
+	// Dynamic resolver mock returning 127.0.0.1
+	r := NewDynamicResolver("example.com", time.Minute, logger)
+	r.ipCache = "127.0.0.1"
+	r.cacheTime = time.Now()
+
+	s := NewDNSServer(DNSServerConfig{
+		BaseDomain: "example.com",
+		Resolver:   r,
+		Logger:     logger,
+		DB:         db,
+		ListenAddr: "127.0.0.1:0",
+	})
+
+	localPC, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen local packet: %v", err)
+	}
+	s.server.PacketConn = localPC
+	defer localPC.Close()
+
+	go func() {
+		if err := s.server.ActivateAndServe(); err != nil {
+			logger.Error("local server err", zap.Error(err))
+		}
+	}()
+	defer s.Shutdown()
+
+	localAddr := localPC.LocalAddr().String()
+
+	// Mock resolver lookup behavior: CNAME resolution of _acme-challenge.userapp.com -> _acme-challenge.proj-myproject123.example.com
+	origResolver := net.DefaultResolver
+	defer func() {
+		net.DefaultResolver = origResolver
+	}()
+
+	mockMux := dns.NewServeMux()
+	mockMux.HandleFunc("_acme-challenge.userapp.com.", func(w dns.ResponseWriter, req *dns.Msg) {
+		msg := new(dns.Msg)
+		msg.SetReply(req)
+		msg.Authoritative = true
+		for _, q := range req.Question {
+			if q.Qtype == dns.TypeCNAME {
+				rr := &dns.CNAME{
+					Hdr: dns.RR_Header{
+						Name:   q.Name,
+						Rrtype: dns.TypeCNAME,
+						Class:  dns.ClassINET,
+						Ttl:    60,
+					},
+					Target: "_acme-challenge.proj-myproject123.example.com.",
+				}
+				msg.Answer = append(msg.Answer, rr)
+			}
+		}
+		w.WriteMsg(msg)
+	})
+
+	mockServer := &dns.Server{
+		Addr:    "127.0.0.1:0",
+		Net:     "udp",
+		Handler: mockMux,
+	}
+	mockPC, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen mock packet: %v", err)
+	}
+	mockServer.PacketConn = mockPC
+	defer mockPC.Close()
+
+	go func() {
+		_ = mockServer.ActivateAndServe()
+	}()
+	defer mockServer.Shutdown()
+
+	mockAddr := mockPC.LocalAddr().String()
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{}
+			return d.DialContext(ctx, "udp", mockAddr)
+		},
+	}
+
+	// 1. Check A Record resolution for proj-myproject123.example.com.
+	c := new(dns.Client)
+	c.Net = "udp"
+	c.Timeout = time.Second
+
+	msgA := new(dns.Msg)
+	msgA.SetQuestion("proj-myproject123.example.com.", dns.TypeA)
+	respA, _, err := c.Exchange(msgA, localAddr)
+	if err != nil {
+		t.Fatalf("A query error: %v", err)
+	}
+	if len(respA.Answer) != 1 {
+		t.Fatalf("expected 1 answer for A query, got %d", len(respA.Answer))
+	}
+	if aRecord, ok := respA.Answer[0].(*dns.A); ok {
+		if !aRecord.A.Equal(net.IPv4(127, 0, 0, 1)) {
+			t.Errorf("got IP %v, want 127.0.0.1", aRecord.A)
+		}
+	} else {
+		t.Errorf("expected A record, got %T", respA.Answer[0])
+	}
+
+	// 2. Check TXT Record resolution for _acme-challenge.proj-myproject123.example.com.
+	s.refreshPendingTXTCacheOnce(context.Background())
+
+	msgTXT := new(dns.Msg)
+	msgTXT.SetQuestion("_acme-challenge.proj-myproject123.example.com.", dns.TypeTXT)
+	respTXT, _, err := c.Exchange(msgTXT, localAddr)
+	if err != nil {
+		t.Fatalf("TXT query error: %v", err)
+	}
+	if len(respTXT.Answer) != 1 {
+		t.Fatalf("expected 1 answer for TXT query, got %d", len(respTXT.Answer))
+	}
+	if txtRecord, ok := respTXT.Answer[0].(*dns.TXT); ok {
+		if len(txtRecord.Txt) != 1 || txtRecord.Txt[0] != "token-proj-123" {
+			t.Errorf("got TXT %v, want [token-proj-123]", txtRecord.Txt)
+		}
+	} else {
+		t.Errorf("expected TXT record, got %T", respTXT.Answer[0])
 	}
 }

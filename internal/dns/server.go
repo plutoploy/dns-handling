@@ -256,13 +256,53 @@ func (s *DNSServer) refreshPendingTXTCacheOnce(ctx context.Context) {
 	s.cacheMu.Unlock()
 }
 
+func (s *DNSServer) isProjectSubdomain(ctx context.Context, projSub string) bool {
+	if s.db == nil {
+		return false
+	}
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM domains WHERE project_subdomain = ?`, projSub).Scan(&count)
+	return err == nil && count > 0
+}
+
+func (s *DNSServer) extractProjectSubdomainOrHexIP(domainName, baseDomain string) string {
+	domainName = strings.TrimSuffix(domainName, ".")
+	baseDomain = strings.TrimSuffix(baseDomain, ".")
+	if !strings.HasSuffix(domainName, baseDomain) {
+		return ""
+	}
+	subdomain := strings.TrimSuffix(domainName, baseDomain)
+	subdomain = strings.TrimSuffix(subdomain, ".")
+
+	labels := strings.Split(subdomain, ".")
+	if len(labels) == 0 {
+		return ""
+	}
+	projSub := labels[len(labels)-1]
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if s.isProjectSubdomain(ctx, projSub) {
+		return projSub
+	}
+
+	parts := strings.Split(projSub, "-")
+	if len(parts) > 0 {
+		lastPart := parts[len(parts)-1]
+		if len(lastPart) == 8 || len(lastPart) == 32 {
+			return lastPart
+		}
+	}
+	return ""
+}
+
 func (s *DNSServer) resolveDomainHexIP(ctx context.Context, domainName string) string {
 	challengeDomain := "_acme-challenge." + domainName
 	cname, err := net.DefaultResolver.LookupCNAME(ctx, challengeDomain)
 	if err == nil {
 		cnameClean := strings.TrimSuffix(cname, ".")
-		if hexIP := extractHexIPFromDomain(cnameClean, s.baseDomain); hexIP != "" {
-			return hexIP
+		if key := s.extractProjectSubdomainOrHexIP(cnameClean, s.baseDomain); key != "" {
+			return key
 		}
 	}
 
@@ -465,28 +505,49 @@ func (s *DNSServer) resolveA(name string) []net.IP {
 	subdomain := strings.TrimSuffix(name, s.zone)
 	subdomain = strings.TrimSuffix(subdomain, ".")
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	labels := strings.Split(subdomain, ".")
+	if len(labels) > 0 {
+		projSub := labels[len(labels)-1]
+		if s.isProjectSubdomain(ctx, projSub) {
+			if s.resolver != nil {
+				ipStr, err := s.resolver.GetPublicIP(ctx)
+				if err == nil {
+					if ip := net.ParseIP(ipStr); ip != nil {
+						if ip4 := ip.To4(); ip4 != nil {
+							s.recordsMu.Lock()
+							s.records[name] = ip
+							s.recordsMu.Unlock()
+							return []net.IP{ip4}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	ip, err := s.decodeSubdomainToIP(subdomain)
-	if err != nil {
-		s.logger.Debug("failed to decode subdomain",
-			zap.String("name", name),
-			zap.Error(err),
-		)
-		return nil
+	if err == nil {
+		if ip4 := ip.To4(); ip4 != nil {
+			s.recordsMu.Lock()
+			s.records[name] = ip
+			s.recordsMu.Unlock()
+
+			s.logger.Debug("resolved domain",
+				zap.String("name", name),
+				zap.String("ip", ip4.String()),
+			)
+
+			return []net.IP{ip4}
+		}
 	}
 
-	if ip4 := ip.To4(); ip4 != nil {
-		s.recordsMu.Lock()
-		s.records[name] = ip
-		s.recordsMu.Unlock()
-
-		s.logger.Debug("resolved domain",
-			zap.String("name", name),
-			zap.String("ip", ip4.String()),
-		)
-
-		return []net.IP{ip4}
-	}
-
+	s.logger.Debug("failed to resolve subdomain",
+		zap.String("name", name),
+		zap.Error(err),
+	)
 	return nil
 }
 
@@ -510,22 +571,43 @@ func (s *DNSServer) resolveAAAA(name string) []net.IP {
 	subdomain := strings.TrimSuffix(name, s.zone)
 	subdomain = strings.TrimSuffix(subdomain, ".")
 
-	ip, err := s.decodeSubdomainToIP(subdomain)
-	if err != nil {
-		return nil
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	labels := strings.Split(subdomain, ".")
+	if len(labels) > 0 {
+		projSub := labels[len(labels)-1]
+		if s.isProjectSubdomain(ctx, projSub) {
+			if s.resolver != nil {
+				ipStr, err := s.resolver.GetPublicIP(ctx)
+				if err == nil {
+					if ip := net.ParseIP(ipStr); ip != nil {
+						if ip.To4() == nil {
+							s.recordsMu.Lock()
+							s.records[name] = ip
+							s.recordsMu.Unlock()
+							return []net.IP{ip}
+						}
+					}
+				}
+			}
+		}
 	}
 
-	if ip.To4() == nil {
-		s.recordsMu.Lock()
-		s.records[name] = ip
-		s.recordsMu.Unlock()
+	ip, err := s.decodeSubdomainToIP(subdomain)
+	if err == nil {
+		if ip.To4() == nil {
+			s.recordsMu.Lock()
+			s.records[name] = ip
+			s.recordsMu.Unlock()
 
-		s.logger.Debug("resolved domain",
-			zap.String("name", name),
-			zap.String("ip", ip.String()),
-		)
+			s.logger.Debug("resolved domain",
+				zap.String("name", name),
+				zap.String("ip", ip.String()),
+			)
 
-		return []net.IP{ip}
+			return []net.IP{ip}
+		}
 	}
 
 	return nil
@@ -602,7 +684,8 @@ func (s *DNSServer) domainMatchesHexIP(ctx context.Context, domainName, hexIP st
 	cname, err := net.DefaultResolver.LookupCNAME(ctx, challengeDomain)
 	if err == nil {
 		cnameClean := strings.TrimSuffix(cname, ".")
-		if extractHexIPFromDomain(cnameClean, s.baseDomain) == hexIP {
+		key := s.extractProjectSubdomainOrHexIP(cnameClean, s.baseDomain)
+		if key == hexIP {
 			return true
 		}
 	}
@@ -623,13 +706,13 @@ func (s *DNSServer) domainMatchesHexIP(ctx context.Context, domainName, hexIP st
 }
 
 func (s *DNSServer) lookupPendingTXTRecord(ctx context.Context, name string) []string {
-	hexIP := extractHexIPFromDomain(name, s.baseDomain)
-	if hexIP == "" {
+	key := s.extractProjectSubdomainOrHexIP(name, s.baseDomain)
+	if key == "" {
 		return nil
 	}
 
 	s.cacheMu.RLock()
-	records := append([]string(nil), s.pendingTXT[hexIP]...)
+	records := append([]string(nil), s.pendingTXT[key]...)
 	s.cacheMu.RUnlock()
 
 	if len(records) > 0 {

@@ -19,13 +19,14 @@ const (
 )
 
 type Domain struct {
-	ID                string    `json:"id"`
-	DomainName        string    `json:"domain_name"`
-	VerificationToken string    `json:"verification_token"`
-	Status            Status    `json:"status"`
+	ID                string     `json:"id"`
+	DomainName        string     `json:"domain_name"`
+	VerificationToken string     `json:"verification_token"`
+	ProjectSubdomain  string     `json:"project_subdomain"`
+	Status            Status     `json:"status"`
 	VerifiedAt        *time.Time `json:"verified_at,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
 type Repository interface {
@@ -52,8 +53,21 @@ func GenerateToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
+func GenerateProjectSubdomain() (string, error) {
+	b := make([]byte, 4)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate project subdomain: %w", err)
+	}
+	return fmt.Sprintf("proj-%s", hex.EncodeToString(b)), nil
+}
+
 func (s *Service) Create(ctx context.Context, domainName string) (*Domain, error) {
 	token, err := GenerateToken()
+	if err != nil {
+		return nil, err
+	}
+
+	projSub, err := GenerateProjectSubdomain()
 	if err != nil {
 		return nil, err
 	}
@@ -62,6 +76,7 @@ func (s *Service) Create(ctx context.Context, domainName string) (*Domain, error
 		ID:                newID(),
 		DomainName:        domainName,
 		VerificationToken: token,
+		ProjectSubdomain:  projSub,
 		Status:            StatusPending,
 		CreatedAt:         time.Now().UTC(),
 		UpdatedAt:         time.Now().UTC(),

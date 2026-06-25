@@ -18,9 +18,9 @@ func NewDomainRepository(db *DB) *DomainRepository {
 
 func (r *DomainRepository) Create(ctx context.Context, d *domain.Domain) error {
 	_, err := r.db.ExecContext(ctx,
-		`INSERT INTO domains (id, domain_name, verification_token, status, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		d.ID, d.DomainName, d.VerificationToken, d.Status, d.CreatedAt, d.UpdatedAt,
+		`INSERT INTO domains (id, domain_name, verification_token, project_subdomain, status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		d.ID, d.DomainName, d.VerificationToken, d.ProjectSubdomain, d.Status, d.CreatedAt, d.UpdatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("insert domain: %w", err)
@@ -30,7 +30,7 @@ func (r *DomainRepository) Create(ctx context.Context, d *domain.Domain) error {
 
 func (r *DomainRepository) GetByID(ctx context.Context, id string) (*domain.Domain, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, domain_name, verification_token, status, verified_at, created_at, updated_at
+		`SELECT id, domain_name, verification_token, COALESCE(project_subdomain, ''), status, verified_at, created_at, updated_at
 		 FROM domains WHERE id = ?`, id,
 	)
 
@@ -39,7 +39,7 @@ func (r *DomainRepository) GetByID(ctx context.Context, id string) (*domain.Doma
 
 func (r *DomainRepository) GetByDomainName(ctx context.Context, name string) (*domain.Domain, error) {
 	row := r.db.QueryRowContext(ctx,
-		`SELECT id, domain_name, verification_token, status, verified_at, created_at, updated_at
+		`SELECT id, domain_name, verification_token, COALESCE(project_subdomain, ''), status, verified_at, created_at, updated_at
 		 FROM domains WHERE domain_name = ?`, name,
 	)
 
@@ -48,7 +48,7 @@ func (r *DomainRepository) GetByDomainName(ctx context.Context, name string) (*d
 
 func (r *DomainRepository) ListByStatus(ctx context.Context, status domain.Status) ([]*domain.Domain, error) {
 	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, domain_name, verification_token, status, verified_at, created_at, updated_at
+		`SELECT id, domain_name, verification_token, COALESCE(project_subdomain, ''), status, verified_at, created_at, updated_at
 		 FROM domains WHERE status = ? ORDER BY created_at ASC`, status,
 	)
 	if err != nil {
@@ -60,7 +60,7 @@ func (r *DomainRepository) ListByStatus(ctx context.Context, status domain.Statu
 	for rows.Next() {
 		var d domain.Domain
 		var verifiedAt sql.NullTime
-		if err := rows.Scan(&d.ID, &d.DomainName, &d.VerificationToken, &d.Status, &verifiedAt, &d.CreatedAt, &d.UpdatedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.DomainName, &d.VerificationToken, &d.ProjectSubdomain, &d.Status, &verifiedAt, &d.CreatedAt, &d.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan domain: %w", err)
 		}
 		if verifiedAt.Valid {
@@ -89,7 +89,7 @@ func scanDomain(row *sql.Row) (*domain.Domain, error) {
 	var d domain.Domain
 	var verifiedAt sql.NullTime
 
-	err := row.Scan(&d.ID, &d.DomainName, &d.VerificationToken, &d.Status, &verifiedAt, &d.CreatedAt, &d.UpdatedAt)
+	err := row.Scan(&d.ID, &d.DomainName, &d.VerificationToken, &d.ProjectSubdomain, &d.Status, &verifiedAt, &d.CreatedAt, &d.UpdatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("domain not found")
