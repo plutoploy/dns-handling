@@ -58,6 +58,18 @@ func (r *memoryDomainRepo) GetByDomainName(ctx context.Context, name string) (*d
 	return nil, errors.New("domain not found")
 }
 
+func (r *memoryDomainRepo) ListByStatus(ctx context.Context, status domain.Status) ([]*domain.Domain, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*domain.Domain
+	for _, d := range r.domains {
+		if d.Status == status {
+			out = append(out, cloneDomain(d))
+		}
+	}
+	return out, nil
+}
+
 func (r *memoryDomainRepo) Update(ctx context.Context, d *domain.Domain) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -149,6 +161,20 @@ func (p *mockACMEProvider) CompleteOrder(ctx context.Context, accountKey crypto.
 	return p.certPEM, p.keyPEM, p.issuedAt, p.expiresAt, nil
 }
 
+func (p *mockACMEProvider) GetOrderByDomainID(ctx context.Context, domainID string) (*acme.Order, error) {
+	if p.order != nil && p.order.DomainID == domainID {
+		return p.order, nil
+	}
+	return nil, errors.New("order not found")
+}
+
+func (p *mockACMEProvider) GetChallengeByDomainID(ctx context.Context, domainID string) (*acme.Challenge, error) {
+	if p.challenge != nil && p.challenge.DomainID == domainID {
+		return p.challenge, nil
+	}
+	return nil, errors.New("challenge not found")
+}
+
 type staticTXTResolver struct {
 	records map[string][]string
 	err     error
@@ -215,7 +241,7 @@ func TestIssueCertificateCompletesAfterRequestContextEnds(t *testing.T) {
 		},
 	}
 
-	h := NewHandler(domainSvc, certSvc, prov, resolver, zap.NewNop(), 10*time.Millisecond, 250*time.Millisecond)
+	h := NewHandler(domainSvc, certSvc, prov, resolver, zap.NewNop(), context.Background(), 10*time.Millisecond, 250*time.Millisecond)
 
 	reqCtx, cancel := context.WithCancel(context.Background())
 	req := httptest.NewRequest(http.MethodPost, "/domains/"+domainID+"/issue-certificate", nil).WithContext(reqCtx)
@@ -309,7 +335,7 @@ func TestIssueCertificateTimeoutMarksFailed(t *testing.T) {
 		},
 	}
 
-	h := NewHandler(domainSvc, certSvc, prov, resolver, zap.NewNop(), 10*time.Millisecond, 80*time.Millisecond)
+	h := NewHandler(domainSvc, certSvc, prov, resolver, zap.NewNop(), context.Background(), 10*time.Millisecond, 80*time.Millisecond)
 
 	req := httptest.NewRequest(http.MethodPost, "/domains/"+domainID+"/issue-certificate", nil)
 	req.SetPathValue("id", domainID)

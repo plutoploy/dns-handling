@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -59,6 +58,9 @@ func main() {
 		logger.Fatal("database migration", zap.Error(err))
 	}
 
+	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	dnsResolver := dns.NewNetResolver(cfg.DNSTimeout)
 	dynamicResolver := dns.NewDynamicResolver(cfg.BaseDomain, 5*time.Minute, logger)
 
@@ -100,6 +102,7 @@ func main() {
 		acmeProv,
 		dnsResolver,
 		logger,
+		rootCtx,
 		cfg.PollInterval,
 		cfg.PollTimeout,
 	)
@@ -114,19 +117,16 @@ func main() {
 		logger.Fatal("create TLS server", zap.Error(err))
 	}
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-
 	go func() {
 		logger.Info("managing dynamic domain")
-		if _, err := magicManager.ManageDynamicDomain(context.Background()); err != nil {
+		if _, err := magicManager.ManageDynamicDomain(rootCtx); err != nil {
 			logger.Error("manage dynamic domain", zap.Error(err))
 		}
 	}()
 
 	go func() {
 		logger.Info("DNS server listening", zap.String("addr", cfg.DNSAddr))
-		if err := dnsSrv.Start(); err != nil {
+		if err := dnsSrv.Start(rootCtx); err != nil {
 			logger.Error("DNS server error", zap.Error(err))
 		}
 	}()
@@ -145,7 +145,13 @@ func main() {
 		}
 	}()
 
-	<-quit
+	go func() {
+		if err := domainHandler.ResumePendingACME(rootCtx); err != nil {
+			logger.Error("resume pending acme", zap.Error(err))
+		}
+	}()
+
+	<-rootCtx.Done()
 	logger.Info("shutting down...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

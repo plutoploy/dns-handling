@@ -149,7 +149,7 @@ _Note the domain `id` returned, which is required for all subsequent steps._
 
 ### Step 2: Configure the DNS Challenge Record
 
-Before triggering verification, you must publish the challenge token so the verification endpoint can find it. You have two options:
+Before triggering verification, you must publish the challenge token so the verification endpoint can find it. You have three options:
 
 #### Option A: Using Your Public DNS Provider
 
@@ -175,6 +175,19 @@ curl -X POST "${API_BASE_URL}/dns/records" \
     "ttl": 300
   }'
 ```
+
+#### Option C: Automated CNAME Delegation (Recommended)
+
+If the built-in DNS server is authoritative for your wildcard zone (e.g., `*.example.com`), you can automate the process entirely using CNAMEs.
+
+Suppose your project is `p0-acbcedcd.example.com` (representing IP `172.188.237.205`), and you want to verify ownership of `a.acme.org`:
+
+1. Set up a CNAME for your app domain to point to your project:
+   `a.acme.org` -> CNAME `p0-acbcedcd.example.com`
+2. Set up a CNAME for the verification challenge:
+   `_acme-challenge.a.acme.org` -> CNAME `_acme-challenge.p0-acbcedcd.example.com` (or directly to `p0-acbcedcd.example.com`)
+
+The built-in DNS server will automatically detect queries for `_acme-challenge.p0-acbcedcd.example.com` (or `p0-acbcedcd.example.com`), map the request back to the pending domain/challenge record in the SQLite database by matching CNAMEs and IPs, and respond dynamically with the correct token or key authorization! No manual TXT configuration or injection is required.
 
 ---
 
@@ -294,7 +307,7 @@ go run cmd/getip/main.go -domain=.example.com
 **Example Output**:
 
 ```text
-Dynamic Subdomain: c0a80164.example.com
+Dynamic Subdomain: dns.c0a80164.example.com
 ```
 
 This is useful for generating local testing subdomains representing the host's actual IP address.

@@ -90,7 +90,11 @@ func (h *DNSHandler) AddRecord(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid IP address")
 			return
 		}
-		h.dnsServer.AddStaticRecord(req.Name, ip)
+		if err := h.dnsServer.AddStaticRecord(req.Name, ip); err != nil {
+			h.logger.Error("add static record", zap.Error(err))
+			writeError(w, http.StatusInternalServerError, "add record failed: %v", err)
+			return
+		}
 
 	case dns.RecordTypeCNAME, dns.RecordTypeTXT, dns.RecordTypeMX, dns.RecordTypeSRV:
 		if req.Value == "" {
@@ -100,14 +104,18 @@ func (h *DNSHandler) AddRecord(w http.ResponseWriter, r *http.Request) {
 		if req.TTL == 0 {
 			req.TTL = 300
 		}
-		h.dnsServer.AddManualRecord(dns.ManualRecord{
+		if err := h.dnsServer.AddManualRecord(dns.ManualRecord{
 			Name:   req.Name,
 			Type:   recType,
 			Value:  req.Value,
 			TTL:    req.TTL,
 			Target: req.Target,
 			Pref:   req.Pref,
-		})
+		}); err != nil {
+			h.logger.Error("add manual record", zap.Error(err))
+			writeError(w, http.StatusInternalServerError, "add record failed: %v", err)
+			return
+		}
 
 	default:
 		writeError(w, http.StatusBadRequest, "unsupported record type: %s", req.Type)
@@ -140,10 +148,20 @@ func (h *DNSHandler) RemoveRecord(w http.ResponseWriter, r *http.Request) {
 
 	switch recType {
 	case dns.RecordTypeA, dns.RecordTypeAAAA:
-		h.dnsServer.RemoveStaticRecord(req.Name)
+		if err := h.dnsServer.RemoveStaticRecord(req.Name); err != nil {
+			h.logger.Error("remove static record", zap.Error(err))
+			writeError(w, http.StatusInternalServerError, "remove record failed: %v", err)
+			return
+		}
 
 	case dns.RecordTypeCNAME, dns.RecordTypeTXT, dns.RecordTypeMX, dns.RecordTypeSRV:
-		if !h.dnsServer.RemoveManualRecord(req.Name, recType, req.Value) {
+		ok, err := h.dnsServer.RemoveManualRecord(req.Name, recType, req.Value)
+		if err != nil {
+			h.logger.Error("remove manual record", zap.Error(err))
+			writeError(w, http.StatusInternalServerError, "remove record failed: %v", err)
+			return
+		}
+		if !ok {
 			writeError(w, http.StatusNotFound, "record not found")
 			return
 		}

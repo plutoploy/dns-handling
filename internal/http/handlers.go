@@ -17,6 +17,7 @@ import (
 )
 
 type Handler struct {
+	appCtx    context.Context
 	domainSvc *domain.Service
 	certSvc   *certificates.Service
 	acmeProv  acme.Provider
@@ -32,6 +33,7 @@ func NewHandler(
 	acmeProv acme.Provider,
 	dns dns.Resolver,
 	logger *zap.Logger,
+	appCtx context.Context,
 	pollInterval, pollTimeout time.Duration,
 ) *Handler {
 	if domainSvc == nil {
@@ -49,7 +51,11 @@ func NewHandler(
 	if logger == nil {
 		panic("http handler requires logger")
 	}
+	if appCtx == nil {
+		appCtx = context.Background()
+	}
 	return &Handler{
+		appCtx:    appCtx,
 		domainSvc: domainSvc,
 		certSvc:   certSvc,
 		acmeProv:  acmeProv,
@@ -218,7 +224,7 @@ func (h *Handler) IssueCertificate(w http.ResponseWriter, r *http.Request) {
 
 	challengeDomain := h.domainSvc.ChallengeDomain(d.DomainName)
 
-	go h.pollACME(d.ID, d.DomainName, accountKey, accountKID, order.ID, *challenge)
+	go h.pollACME(h.appCtx, d.ID, d.DomainName, accountKey, accountKID, order.ID, *challenge)
 
 	resp := issueCertResp{
 		OrderID:          order.ID,
@@ -231,8 +237,7 @@ func (h *Handler) IssueCertificate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, resp)
 }
 
-func (h *Handler) pollACME(domainID, domainName string, accountKey crypto.Signer, accountKID, orderID string, ch acme.Challenge) {
-	ctx := context.Background()
+func (h *Handler) pollACME(ctx context.Context, domainID, domainName string, accountKey crypto.Signer, accountKID, orderID string, ch acme.Challenge) {
 	pollCtx, cancel := context.WithTimeout(ctx, h.pollTO)
 	defer cancel()
 
@@ -243,9 +248,13 @@ func (h *Handler) pollACME(domainID, domainName string, accountKey crypto.Signer
 
 	for {
 		select {
+		case <-ctx.Done():
+			h.logger.Info("acme polling stopped", zap.String("domain", domainName))
+			return
+
 		case <-pollCtx.Done():
 			h.logger.Error("acme polling timed out", zap.String("domain", domainName))
-			if _, err := h.domainSvc.SetFailed(ctx, domainID); err != nil {
+			if _, err := h.domainSvc.SetFailed(context.Background(), domainID); err != nil {
 				h.logger.Error("set domain failed", zap.Error(err))
 			}
 			return
@@ -274,21 +283,21 @@ func (h *Handler) pollACME(domainID, domainName string, accountKey crypto.Signer
 			certPEM, keyPEM, issuedAt, expiresAt, err := h.acmeProv.CompleteOrder(pollCtx, accountKey, accountKID, orderID, ch)
 			if err != nil {
 				h.logger.Error("acme complete order failed", zap.String("domain", domainName), zap.Error(err))
-				if _, err := h.domainSvc.SetFailed(ctx, domainID); err != nil {
+			if _, err := h.domainSvc.SetFailed(context.Background(), domainID); err != nil {
 					h.logger.Error("set domain failed", zap.Error(err))
 				}
 				return
 			}
 
-			if _, err := h.certSvc.Store(ctx, domainID, certPEM, keyPEM, issuedAt, expiresAt); err != nil {
+			if _, err := h.certSvc.Store(context.Background(), domainID, certPEM, keyPEM, issuedAt, expiresAt); err != nil {
 				h.logger.Error("store certificate failed", zap.String("domain", domainName), zap.Error(err))
-				if _, err := h.domainSvc.SetFailed(ctx, domainID); err != nil {
+				if _, err := h.domainSvc.SetFailed(context.Background(), domainID); err != nil {
 					h.logger.Error("set domain failed", zap.Error(err))
 				}
 				return
 			}
 
-			if _, err := h.domainSvc.SetActive(ctx, domainID); err != nil {
+			if _, err := h.domainSvc.SetActive(context.Background(), domainID); err != nil {
 				h.logger.Error("set domain active failed", zap.Error(err))
 				return
 			}

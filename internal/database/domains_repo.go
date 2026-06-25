@@ -46,6 +46,34 @@ func (r *DomainRepository) GetByDomainName(ctx context.Context, name string) (*d
 	return scanDomain(row)
 }
 
+func (r *DomainRepository) ListByStatus(ctx context.Context, status domain.Status) ([]*domain.Domain, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT id, domain_name, verification_token, status, verified_at, created_at, updated_at
+		 FROM domains WHERE status = ? ORDER BY created_at ASC`, status,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list domains by status: %w", err)
+	}
+	defer rows.Close()
+
+	var out []*domain.Domain
+	for rows.Next() {
+		var d domain.Domain
+		var verifiedAt sql.NullTime
+		if err := rows.Scan(&d.ID, &d.DomainName, &d.VerificationToken, &d.Status, &verifiedAt, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan domain: %w", err)
+		}
+		if verifiedAt.Valid {
+			d.VerifiedAt = &verifiedAt.Time
+		}
+		out = append(out, &d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate domains: %w", err)
+	}
+	return out, nil
+}
+
 func (r *DomainRepository) Update(ctx context.Context, d *domain.Domain) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE domains SET status = ?, verified_at = ?, updated_at = ? WHERE id = ?`,

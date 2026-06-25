@@ -80,11 +80,11 @@ func (r *DynamicResolver) IPToSubdomain(ip string) (string, error) {
 
 	if v4 := parsedIP.To4(); v4 != nil {
 		hexStr := fmt.Sprintf("%02x%02x%02x%02x", v4[0], v4[1], v4[2], v4[3])
-		return hexStr + "." + r.baseDomain, nil
+		return "dns." + hexStr + "." + r.baseDomain, nil
 	}
 
 	hexStr := hex.EncodeToString(parsedIP.To16())
-	return hexStr + "." + r.baseDomain, nil
+	return "dns." + hexStr + "." + r.baseDomain, nil
 }
 
 func (r *DynamicResolver) GetDynamicDomain(ctx context.Context) (string, error) {

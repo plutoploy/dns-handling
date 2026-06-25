@@ -74,6 +74,8 @@ type Provider interface {
 	SetupAccount(ctx context.Context) (crypto.Signer, string, error)
 	StartOrder(ctx context.Context, domainID, domainName string, accountKey crypto.Signer, accountKID string) (*Order, *Challenge, error)
 	CompleteOrder(ctx context.Context, accountKey crypto.Signer, accountKID, orderID string, ch Challenge) (string, string, time.Time, time.Time, error)
+	GetOrderByDomainID(ctx context.Context, domainID string) (*Order, error)
+	GetChallengeByDomainID(ctx context.Context, domainID string) (*Challenge, error)
 }
 
 type ACMEProvider struct {
@@ -322,6 +324,14 @@ func (p *ACMEProvider) CompleteOrder(
 	_ = p.orderRepo.Update(ctx, orderRec)
 
 	return certPEM, keyPEM, issuedAt, expiresAt, nil
+}
+
+func (p *ACMEProvider) GetOrderByDomainID(ctx context.Context, domainID string) (*Order, error) {
+	return p.orderRepo.GetByDomainID(ctx, domainID)
+}
+
+func (p *ACMEProvider) GetChallengeByDomainID(ctx context.Context, domainID string) (*Challenge, error) {
+	return p.challengeRep.GetByDomainID(ctx, domainID)
 }
 
 func pemToSigner(pemStr string) (crypto.Signer, error) {

@@ -39,6 +39,16 @@ func (r *mockRepo) GetByDomainName(ctx context.Context, name string) (*Domain, e
 	return nil, fmt.Errorf("not found")
 }
 
+func (r *mockRepo) ListByStatus(ctx context.Context, status Status) ([]*Domain, error) {
+	var out []*Domain
+	for _, d := range r.domains {
+		if d.Status == status {
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
 func (r *mockRepo) Update(ctx context.Context, d *Domain) error {
 	r.domains[d.ID] = d
 	return nil
@@ -49,8 +59,8 @@ func TestGenerateToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateToken() error = %v", err)
 	}
-	if len(token) != 64 {
-		t.Errorf("expected token length 64, got %d", len(token))
+	if len(token) != 32 {
+		t.Errorf("expected token length 32, got %d", len(token))
 	}
 }
 

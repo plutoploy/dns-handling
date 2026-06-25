@@ -3,7 +3,6 @@ package domain
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"time"
@@ -33,6 +32,7 @@ type Repository interface {
 	Create(ctx context.Context, d *Domain) error
 	GetByID(ctx context.Context, id string) (*Domain, error)
 	GetByDomainName(ctx context.Context, name string) (*Domain, error)
+	ListByStatus(ctx context.Context, status Status) ([]*Domain, error)
 	Update(ctx context.Context, d *Domain) error
 }
 
@@ -45,12 +45,11 @@ func NewService(repo Repository) *Service {
 }
 
 func GenerateToken() (string, error) {
-	b := make([]byte, 32)
+	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("generate token: %w", err)
 	}
-	h := sha256.Sum256(b)
-	return hex.EncodeToString(h[:]), nil
+	return hex.EncodeToString(b), nil
 }
 
 func (s *Service) Create(ctx context.Context, domainName string) (*Domain, error) {
@@ -77,6 +76,10 @@ func (s *Service) Create(ctx context.Context, domainName string) (*Domain, error
 
 func (s *Service) GetByID(ctx context.Context, id string) (*Domain, error) {
 	return s.repo.GetByID(ctx, id)
+}
+
+func (s *Service) ListByStatus(ctx context.Context, status Status) ([]*Domain, error) {
+	return s.repo.ListByStatus(ctx, status)
 }
 
 func (s *Service) VerifyTXT(ctx context.Context, id string, txtRecords []string) (*Domain, error) {

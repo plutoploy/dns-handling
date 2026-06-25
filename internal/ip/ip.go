@@ -28,12 +28,17 @@ func GetSubdomain(domain string) (string, error) {
 		return "", fmt.Errorf("invalid IP address returned: %s", ipStr)
 	}
 
+	suffix := domain
+	if suffix != "" && !strings.HasPrefix(suffix, ".") {
+		suffix = "." + suffix
+	}
+
 	if ip.To4() != nil {
 		ipv4 := ip.To4()
 		hexStr := fmt.Sprintf("%02x%02x%02x%02x", ipv4[0], ipv4[1], ipv4[2], ipv4[3])
-		return hexStr + domain, nil
+		return "dns." + hexStr + suffix, nil
 	} else {
 		hexStr := hex.EncodeToString(ip)
-		return hexStr + domain, nil
+		return "dns." + hexStr + suffix, nil
 	}
 }
