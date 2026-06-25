@@ -10,6 +10,8 @@ First, set up your environment variables by copying the example `.env` file:
 cp .env.example .env
 ```
 
+The server reads `.env` automatically at startup.
+
 Inside the `.env` file, configure your database, Let's Encrypt endpoint (currently set to staging), and server address:
 
 ```env
@@ -17,8 +19,11 @@ Inside the `.env` file, configure your database, Let's Encrypt endpoint (current
 DATABASE_URL=file:./tls.db
 
 # ACME
-ACME_EMAIL=admin@example.com
-ACME_DIRECTORY=https://acme-staging-v02.api.letsencrypt.org/directory
+ACME_EMAIL=your-email@example.com
+ACME_DIRECTORY=https://your-acme-directory.example/directory
+
+# Example base URL for the curl snippets below
+API_BASE_URL=http://your-host:8080
 
 # Server
 SERVER_ADDR=:8080
@@ -38,13 +43,13 @@ go run cmd/server/main.go
 
 ## 3. Using the REST API
 
-Once the server is running on `localhost:8080`, you can interact with the domain lifecycle via the provided REST endpoints:
+Once the server is running, point `API_BASE_URL` at it and use the REST endpoints below:
 
 ### Step 1: Register a Domain
 Submit a domain name to generate a verification token.
 
 ```bash
-curl -X POST http://localhost:8080/domains \
+curl -X POST "${API_BASE_URL}/domains" \
   -H "Content-Type: application/json" \
   -d '{"domain_name": "example.com"}'
 ```
@@ -54,26 +59,26 @@ curl -X POST http://localhost:8080/domains \
 Check the status of your domain using the ID returned in the previous step.
 
 ```bash
-curl http://localhost:8080/domains/<domain_id>
+curl "${API_BASE_URL}/domains/<domain_id>"
 ```
 
 ### Step 3: Trigger Verification
 Once you've added the TXT record to your DNS, tell the server to verify it.
 
 ```bash
-curl -X POST http://localhost:8080/domains/<domain_id>/verify
+curl -X POST "${API_BASE_URL}/domains/<domain_id>/verify"
 ```
 
 ### Step 4: Issue Certificate
 After verification succeeds, start the ACME DNS-01 certificate order.
 
 ```bash
-curl -X POST http://localhost:8080/domains/<domain_id>/issue-certificate
+curl -X POST "${API_BASE_URL}/domains/<domain_id>/issue-certificate"
 ```
 
 ### Step 5: Retrieve Certificate
 Finally, once the certificate is generated, you can retrieve its metadata.
 
 ```bash
-curl http://localhost:8080/domains/<domain_id>/certificate
+curl "${API_BASE_URL}/domains/<domain_id>/certificate"
 ```

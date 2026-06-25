@@ -1,10 +1,13 @@
 package tls
 
 import (
+	"time"
 	"testing"
 
 	"github.com/caddyserver/certmagic"
 	"go.uber.org/zap/zaptest"
+
+	"plutoploy/tls/internal/dns"
 )
 
 func TestNewCertMagicManager(t *testing.T) {
@@ -13,14 +16,19 @@ func TestNewCertMagicManager(t *testing.T) {
 	storage := &certmagic.FileStorage{
 		Path: t.TempDir(),
 	}
+	resolver := dns.NewDynamicResolver("example.com", time.Minute, logger)
 
 	// This should not panic
-	manager := NewCertMagicManager(ManagerConfig{
+	manager, err := NewCertMagicManager(ManagerConfig{
 		Email:   "test@example.com",
 		CA:      certmagic.LetsEncryptStagingCA,
 		Storage: storage,
+		Resolver: resolver,
 		Logger:  logger,
 	})
+	if err != nil {
+		t.Fatalf("NewCertMagicManager() error = %v", err)
+	}
 
 	if manager == nil {
 		t.Fatal("expected manager to be non-nil")

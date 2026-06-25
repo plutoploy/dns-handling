@@ -32,14 +32,19 @@ Create a `.env` file in the root directory by copying the example template:
 cp .env.example .env
 ```
 
+The server loads `.env` automatically on startup, then falls back to the process environment.
+
 Customize the environment variables inside `.env`:
 ```env
 # Database connection string (libSQL/sqlite)
 DATABASE_URL=file:./tls.db
 
 # ACME Settings
-ACME_EMAIL=admin@example.com
-ACME_DIRECTORY=https://acme-staging-v02.api.letsencrypt.org/directory
+ACME_EMAIL=your-email@example.com
+ACME_DIRECTORY=https://your-acme-directory.example/directory
+
+# Example base URL for curl snippets in this guide
+API_BASE_URL=http://your-host:8080
 
 # Server addresses
 SERVER_ADDR=:8080
@@ -100,7 +105,7 @@ This guide walks you through registering a custom domain, performing DNS challen
 
 ### Prerequisites
 For this manual, we assume:
-*   The server is running locally on port `8080` (`http://localhost:8080`).
+*   `API_BASE_URL` points to the running server.
 *   Your configured `AUTH_TOKEN` is `your_secure_bearer_token` (include the header `Authorization: Bearer your_secure_bearer_token` in all API requests).
 *   You want to register the domain `example.com`.
 
@@ -111,7 +116,7 @@ To start the domain lifecycle, submit a registration request. This inserts a rec
 
 **Request**:
 ```bash
-curl -X POST http://localhost:8080/domains \
+curl -X POST "${API_BASE_URL}/domains" \
   -H "Authorization: Bearer your_secure_bearer_token" \
   -H "Content-Type: application/json" \
   -d '{"domain_name": "example.com"}'
@@ -144,7 +149,7 @@ Log in to your DNS registrar (e.g., Cloudflare, GoDaddy, AWS Route53) and add a 
 #### Option B: Using the Service's Built-in DNS Server
 If you've configured the service's DNS server to be authoritative for your zone, you can inject the record directly via the `/dns/records` endpoint:
 ```bash
-curl -X POST http://localhost:8080/dns/records \
+curl -X POST "${API_BASE_URL}/dns/records" \
   -H "Authorization: Bearer your_secure_bearer_token" \
   -H "Content-Type: application/json" \
   -d '{
@@ -162,7 +167,7 @@ Once the TXT record has propagated, command the service to verify the DNS record
 
 **Request**:
 ```bash
-curl -X POST http://localhost:8080/domains/e4b9be32-bc56-4b2a-bf3d-4c3111f1816e/verify \
+curl -X POST "${API_BASE_URL}/domains/e4b9be32-bc56-4b2a-bf3d-4c3111f1816e/verify" \
   -H "Authorization: Bearer your_secure_bearer_token"
 ```
 
@@ -185,7 +190,7 @@ After the domain is marked as `verified`, start the ACME certificate order proce
 
 **Request**:
 ```bash
-curl -X POST http://localhost:8080/domains/e4b9be32-bc56-4b2a-bf3d-4c3111f1816e/issue-certificate \
+curl -X POST "${API_BASE_URL}/domains/e4b9be32-bc56-4b2a-bf3d-4c3111f1816e/issue-certificate" \
   -H "Authorization: Bearer your_secure_bearer_token"
 ```
 
@@ -208,7 +213,7 @@ Wait a few seconds for the background polling loop to resolve the ACME challenge
 
 **Request**:
 ```bash
-curl http://localhost:8080/domains/e4b9be32-bc56-4b2a-bf3d-4c3111f1816e \
+curl "${API_BASE_URL}/domains/e4b9be32-bc56-4b2a-bf3d-4c3111f1816e" \
   -H "Authorization: Bearer your_secure_bearer_token"
 ```
 
@@ -230,7 +235,7 @@ After the domain becomes `active`, download the certificate metadata.
 
 **Request**:
 ```bash
-curl http://localhost:8080/domains/e4b9be32-bc56-4b2a-bf3d-4c3111f1816e/certificate \
+curl "${API_BASE_URL}/domains/e4b9be32-bc56-4b2a-bf3d-4c3111f1816e/certificate" \
   -H "Authorization: Bearer your_secure_bearer_token"
 ```
 

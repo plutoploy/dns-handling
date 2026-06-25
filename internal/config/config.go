@@ -1,10 +1,9 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"time"
-
-	"github.com/caddyserver/certmagic"
 )
 
 type Config struct {
@@ -27,8 +26,8 @@ type Config struct {
 func Load() *Config {
 	return &Config{
 		DatabaseURL:          getEnv("DATABASE_URL", "file:./tls.db"),
-		ACMEEmail:            getEnv("ACME_EMAIL", "admin@example.com"),
-		ACMEDirectory:        getEnv("ACME_DIRECTORY", certmagic.LetsEncryptStagingCA),
+		ACMEEmail:            getEnv("ACME_EMAIL", ""),
+		ACMEDirectory:        getEnv("ACME_DIRECTORY", ""),
 		ServerAddr:           getEnv("SERVER_ADDR", ":8080"),
 		DNSTimeout:           10 * time.Second,
 		PollInterval:         10 * time.Second,
@@ -40,6 +39,19 @@ func Load() *Config {
 		DNSAddr:              getEnv("DNS_ADDR", ":53"),
 		CertMagicStoragePath: getEnv("CERTMAGIC_STORAGE_PATH", "./certmagic-data"),
 		AuthToken:            getEnv("AUTH_TOKEN", ""),
+	}
+}
+
+func (c *Config) Validate() error {
+	switch {
+	case c.ACMEEmail == "":
+		return fmt.Errorf("ACME_EMAIL is required")
+	case c.ACMEDirectory == "":
+		return fmt.Errorf("ACME_DIRECTORY is required")
+	case c.BaseDomain == "":
+		return fmt.Errorf("BASE_DOMAIN is required")
+	default:
+		return nil
 	}
 }
 

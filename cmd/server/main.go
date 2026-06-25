@@ -23,6 +23,10 @@ import (
 )
 
 func main() {
+	if err := config.LoadDotEnv(".env"); err != nil {
+		panic(fmt.Errorf("load .env: %w", err))
+	}
+
 	cfg := config.Load()
 
 	logger, err := zap.NewProduction()
@@ -33,6 +37,10 @@ func main() {
 
 	if cfg.LogLevel == "debug" {
 		logger, _ = zap.NewDevelopment()
+	}
+
+	if err := cfg.Validate(); err != nil {
+		logger.Fatal("invalid config", zap.Error(err))
 	}
 
 	logger.Info("starting tls service",
@@ -68,13 +76,16 @@ func main() {
 		Path: cfg.CertMagicStoragePath,
 	}
 
-	magicManager := tls.NewCertMagicManager(tls.ManagerConfig{
+	magicManager, err := tls.NewCertMagicManager(tls.ManagerConfig{
 		Email:    cfg.ACMEEmail,
 		CA:       cfg.ACMEDirectory,
 		Storage:  certmagicStorage,
 		Resolver: dynamicResolver,
 		Logger:   logger,
 	})
+	if err != nil {
+		logger.Fatal("init certmagic manager", zap.Error(err))
+	}
 
 	dnsSrv := dns.NewDNSServer(dns.DNSServerConfig{
 		ListenAddr: cfg.DNSAddr,

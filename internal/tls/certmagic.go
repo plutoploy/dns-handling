@@ -31,9 +31,21 @@ type ManagerConfig struct {
 	Logger   *zap.Logger
 }
 
-func NewCertMagicManager(cfg ManagerConfig) *CertMagicManager {
+func NewCertMagicManager(cfg ManagerConfig) (*CertMagicManager, error) {
+	if cfg.Email == "" {
+		return nil, fmt.Errorf("email is required")
+	}
 	if cfg.CA == "" {
-		cfg.CA = certmagic.LetsEncryptStagingCA
+		return nil, fmt.Errorf("CA is required")
+	}
+	if cfg.Storage == nil {
+		return nil, fmt.Errorf("storage is required")
+	}
+	if cfg.Resolver == nil {
+		return nil, fmt.Errorf("resolver is required")
+	}
+	if cfg.Logger == nil {
+		return nil, fmt.Errorf("logger is required")
 	}
 
 	m := &CertMagicManager{
@@ -65,7 +77,7 @@ func NewCertMagicManager(cfg ManagerConfig) *CertMagicManager {
 
 	m.config.Issuers = []certmagic.Issuer{issuer}
 
-	return m
+	return m, nil
 }
 
 func (m *CertMagicManager) GetConfig(domain string) *certmagic.Config {
