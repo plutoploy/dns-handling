@@ -61,7 +61,7 @@ func main() {
 	rootCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	dnsResolver := dns.NewNetResolver(cfg.DNSTimeout)
+	dnsResolver := &dns.NetResolver{}
 	dynamicResolver := dns.NewDynamicResolver(cfg.BaseDomain, 5*time.Minute, logger)
 
 	domainRepo := database.NewDomainRepository(db)

@@ -2,40 +2,26 @@ package dns
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"strings"
-	"time"
 )
 
+// Resolver defines the interface for DNS client resolution.
 type Resolver interface {
 	LookupTXT(ctx context.Context, domain string) ([]string, error)
 }
 
-type NetResolver struct {
-	resolver *net.Resolver
-	timeout  time.Duration
-}
+// NetResolver is a simple DNS client using Go's default resolver.
+type NetResolver struct{}
 
-func NewNetResolver(timeout time.Duration) *NetResolver {
-	return &NetResolver{
-		resolver: net.DefaultResolver,
-		timeout:  timeout,
-	}
-}
-
+// LookupTXT queries TXT records for a domain.
 func (r *NetResolver) LookupTXT(ctx context.Context, domain string) ([]string, error) {
-	ctx, cancel := context.WithTimeout(ctx, r.timeout)
-	defer cancel()
-
-	records, err := r.resolver.LookupTXT(ctx, domain)
+	records, err := net.DefaultResolver.LookupTXT(ctx, domain)
 	if err != nil {
-		return nil, fmt.Errorf("lookup TXT %s: %w", domain, err)
+		return nil, err
 	}
-
-	var filtered []string
-	for _, rec := range records {
-		filtered = append(filtered, strings.Trim(rec, `"`))
+	for i, rec := range records {
+		records[i] = strings.Trim(rec, `"`)
 	}
-	return filtered, nil
+	return records, nil
 }
